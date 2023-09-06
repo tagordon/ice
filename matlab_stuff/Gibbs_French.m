@@ -1,0 +1,165 @@
+clear all
+close all
+
+load french_gibbs.mat
+load all_iceVII_literature_data_number.mat
+
+H2O_M = 18.01528 * 1e-3;
+id=find(All_data(:,7) <= 16) ; 
+data=[1e3*All_data(id,1)  All_data(id,2) All_data(id,3)*.1e-5./H2O_M];
+Vd=data(:,3);
+Pd=data(:,1);
+Td=data(:,2);
+
+npc=15;
+ntc=1;
+
+% Gpa and K
+M = 1e6;
+Pb = ([1.8e9/M, 1e12/M]);
+Tb = ([20, 1800]);
+
+%Xc = linspace(Pb(1), Pb(2), npc);
+%Xc = sort([logspace(log10(1.8e9), log10(0.1e12), 15), linspace(0.11e12, 1e12, 10)]);
+%Xc = [linspace(1.8e9, 18e9, 5) logspace(log10(19e9), log10(0.1e12), 15) linspace(0.11e12, 1e12, 10)];
+Xc = [linspace(1.7e9/M, 1e11/M, 30) logspace(log10(1.1e11/M), log10(1e12/M), 30)];
+%Yc = sort([linspace(20, 350, 5*ntc) linspace(360, 1800, 5*ntc)]);
+%Yc = [logspace(log10(20), log10(1600), 20) linspace(1610, 1800, 20)];
+Yc = [linspace(20, 200, 20) linspace(220, 1800, 20)];
+
+Options.PTmc={Xc,Yc};
+% full co-location solutions - no need for regularization
+Options.ordr=[6 6];
+Options.nReg=[1 1];
+Options.lam=1e0*[1e-4 1e-4];
+Options.weight=[1e0 1e0];
+Options.algorithm=1;
+%Options.weight=1e2*[5e6 1e0];
+pvec = pvec./M;
+Data.PTm={pvec, Tvec};
+
+Data.G = reshape(G, nT, nP)';
+Data.rho = reshape(rho, nT, nP)';
+Data.Cp = reshape(Cp, nT, nP)'; 
+Data.mask = reshape(mask, nT, nP)';
+
+% fit for the gibbs surface
+gibbs_interp=spgft(Data,Options);
+
+pid = find(pvec>Pb(1) & pvec<Pb(2));
+tid = find(Tvec>Tb(1) & Tvec<Tb(2));
+
+PTr = {pvec(pid), Tvec(tid)};
+[Pmr, Tmr] = ndgrid(PTr{1}, PTr{2});
+outr = fnGval(gibbs_interp, PTr);
+
+PTd = {Pd, Td};
+outd = fnGval(gibbs_interp, PTd);
+
+%PT={Pb(1):0.1e11:Pb(2),Tb(1):10:Tb(2)};
+PT = PTr;
+[Pm, Tm] = ndgrid(PT{1}, PT{2});
+[pvecm, Tvecm] = ndgrid(pvec, Tvec);
+%G_interp = fnval(gibbs_interp, PT);
+out = fnGval(gibbs_interp, PT);
+
+V_resid = 1./outr.rho - 1./Data.rho(pid, tid);
+Cp_resid = outr.Cp - Data.Cp(pid, tid);
+Data.Cv = reshape(Cv, nT, nP)';
+Cv_resid = outr.Cv - Data.Cv(pid, tid);
+G_resid = outr.G - Data.G(pid, tid);
+
+%dPT=fnval(fnder(gibbs_interp,[1 1]),PTr')';
+%d2P=fnval(fnder(gibbs_interp,[2,0]),PTr')';
+%Cpn=Data.Cv(pid, tid)' - Tmr'.*dPT.^2./d2P;
+
+%d2T=fnval(fnder(gibbs_interp,[0,2]),PTr')';
+%Cpn=-Tmr'.*d2T;
+Cpn_resid = outr.Cp - Data.Cp(pid, tid);
+
+figure(1) %%%%%%%%% first figure %%%%%%%%%%%%%%%%
+subplot(1, 2, 1)
+therm_surf(PT, out.G, Data.mask(pid, tid))
+xlabel('Pressure (Pa)')
+ylabel('Temperature (K)')
+zlabel('Gibbs Energy (J/Kg)')
+
+subplot(1, 2, 2)
+therm_surf(PTr, G_resid, Data.mask(pid, tid))
+xlabel('Pressure (Pa)')
+ylabel('Temperature (K)')
+zlabel('Residuals (J/Kg)')
+
+sgtitle("Gibbs energy")
+
+figure(2) %%%%%%%%%% second figure %%%%%%%%%%%%%%
+subplot(1, 3, 1)
+therm_surf(PT, out.Cp, Data.mask(pid, tid))
+xlabel('Pressure (Pa)')
+ylabel('Temperature (K)')
+zlabel('Cp (J/Kg/K)')
+
+subplot(1, 3, 2)
+therm_surf(PTr, Cp_resid, Data.mask(pid, tid), Data.mask(pid, tid))
+xlabel('Pressure (Pa)')
+ylabel('Temperature (K)')
+zlabel('Residuals (J/Kg/K)')
+
+subplot(1, 3, 3)
+therm_surf(PTr, Cpn_resid, Data.mask(pid, tid), Data.mask(pid, tid))
+xlabel('Pressure (Pa)')
+ylabel('Temperature (K)')
+zlabel('Residuals (J/Kg/K)')
+title('Cp residuals using pressure derivatives')
+
+sgtitle('Cp')
+
+figure(3) %%%%%%%%%% third figure %%%%%%%%%%%%%%
+subplot(1, 2, 1)
+therm_surf(PT, out.Cv, Data.mask(pid, tid))
+xlabel('Pressure (Pa)')
+ylabel('Temperature (K)')
+zlabel('Cv (J/Kg/K)')
+
+subplot(1, 2, 2)
+therm_surf(PTr, Cv_resid, Data.mask(pid, tid))
+xlabel('Pressure (Pa)')
+ylabel('Temperature (K)')
+zlabel('Residuals (J/Kg/K)')
+
+sgtitle('Cv')
+
+figure(4) %%%%%%%%%% fourth figure %%%%%%%%%%%%%%
+subplot(1, 2, 1)
+therm_surf(PT, 1./out.rho, Data.mask(pid, tid))
+hold on
+plot3(Pd, Td, Vd, 'k.')
+xlabel('Pressure (Pa)')
+ylabel('Temperature (K)')
+zlabel('Volume (m^3/Kg)')
+
+subplot(1, 2, 2)
+therm_surf(PTr, V_resid, Data.mask(pid, tid))
+xlabel('Pressure (Pa)')
+ylabel('Temperature (K)')
+zlabel('Residuals (m^3/Kg)')
+
+sgtitle('Volume')
+
+figure(5) %%%%%%%%%% fifth figure %%%%%%%%%%%%%%
+therm_surf(PT, out.alpha, Data.mask(pid, tid))
+xlabel('Pressure (Pa)')
+ylabel('Temperature (K)')
+zlabel('Expansivity (K^-1)')
+
+sgtitle('Thermal Expansivity')
+
+figure(6) %%%%%%%%%% sixth figure %%%%%%%%%%%%%%
+therm_surf(PT, out.vel, Data.mask(pid, tid))
+xlabel('Pressure (Pa)')
+ylabel('Temperature (K)')
+zlabel('Sound speed (m/s)')
+
+sgtitle('Sound speed')
+
+save('gibbs_vii.mat', 'gibbs_interp')
